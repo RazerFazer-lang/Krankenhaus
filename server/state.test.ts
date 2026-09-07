@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyAction, getState, tick } from './state';
+import { applyAction, getState, tick } from './state.js';
 
 describe('Krankenhaus-Simulation', () => {
   it('hat eine initiale Patienten- und Bettenstruktur', () => {
