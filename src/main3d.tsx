@@ -47,7 +47,7 @@ class SoundEngine {
 function makeTextSprite(text: string, color = '#dcecff') {
   const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 128;
   const ctx = canvas.getContext('2d'); if (!ctx) return new THREE.Sprite();
-  ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.font = '700 34px Inter, Arial, sans-serif'; ctx.fillStyle = 'rgba(5,12,19,.82)'; ctx.roundRect(8, 12, 496, 90, 16, 16); ctx.fill();
+  ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.font = '700 34px Inter, Arial, sans-serif'; ctx.fillStyle = 'rgba(5,12,19,.82)'; ctx.roundRect(8, 12, 496, 90, 16); ctx.fill();
   ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, 256, 58);
   const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
   const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
@@ -57,7 +57,6 @@ function makeTextSprite(text: string, color = '#dcecff') {
 function HospitalScene({ state, onPickPatient, onPickDepartment, muted, sound }: { state: HospitalState; onPickPatient: (p: Patient) => void; onPickDepartment: (d: Department) => void; muted: boolean; sound: SoundEngine }) {
   const mount = useRef<HTMLDivElement | null>(null);
   const selectedPulse = useRef<Record<number, THREE.Object3D>>({});
-  const selectedRoom = useRef<string | null>(null);
   const dragging = useRef(false); const last = useRef({ x: 0, y: 0 }); const target = useRef({ x: 0, y: 0, zoom: 30, tilt: 0.9 });
   const objects = useRef<THREE.Object3D[]>([]);
 
@@ -96,17 +95,18 @@ function HospitalScene({ state, onPickPatient, onPickDepartment, muted, sound }:
     const createBed = (room: THREE.Group, index: number, patient?: Patient) => {
       const angle = (index % 2) * Math.PI; const offsetX = (index % 3 - 1) * 2.4; const offsetZ = (Math.floor(index / 3) - 0.5) * 2.2;
       const g = new THREE.Group(); g.position.set(offsetX, 0.2, offsetZ); room.add(g);
-      const frame = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.22, 0.75), new THREE.MeshStandardMaterial({ color: patient ? priorityColor(patient.priority) : 0x4c6676, roughness: 0.7 })); frame.castShadow = true; g.add(frame);
-      const head = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.65, 0.85), new THREE.MeshStandardMaterial({ color: 0xb8c5cf, roughness: 0.85 })); head.position.set(-0.9, 0.35, 0); g.add(head);
-      const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.18, 0.7), new THREE.MeshStandardMaterial({ color: 0xe4edf2, roughness: 1 })); pillow.position.set(-0.55, 0.35, 0); g.add(pillow);
-      g.rotation.y = angle; if (patient) { const tag = makeTextSprite(`#${patient.id} · ${patient.name}`, patient.priority === 'Rot' ? '#ff9098' : '#dcecff'); tag.position.set(0, 1.25, 0); tag.scale.set(2.8, 0.7, 1); g.add(tag); const pulse = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 16), new THREE.MeshBasicMaterial({ color: priorityColor(patient.priority) })); pulse.position.set(0, 1.55, 0.4); g.add(pulse); selectedPulse.current[patient.id] = pulse; }
+      if (patient) g.userData.patientId = patient.id;
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.22, 0.75), new THREE.MeshStandardMaterial({ color: patient ? priorityColor(patient.priority) : 0x4c6676, roughness: 0.7 })); frame.castShadow = true; frame.userData.patientId = patient?.id; g.add(frame);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.65, 0.85), new THREE.MeshStandardMaterial({ color: 0xb8c5cf, roughness: 0.85 })); head.position.set(-0.9, 0.35, 0); head.userData.patientId = patient?.id; g.add(head);
+      const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.18, 0.7), new THREE.MeshStandardMaterial({ color: 0xe4edf2, roughness: 1 })); pillow.position.set(-0.55, 0.35, 0); pillow.userData.patientId = patient?.id; g.add(pillow);
+      g.rotation.y = angle; if (patient) { const tag = makeTextSprite(`#${patient.id} · ${patient.name}`, patient.priority === 'Rot' ? '#ff9098' : '#dcecff'); tag.position.set(0, 1.25, 0); tag.scale.set(2.8, 0.7, 1); tag.userData.patientId = patient.id; g.add(tag); const pulse = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 16), new THREE.MeshBasicMaterial({ color: priorityColor(patient.priority) })); pulse.position.set(0, 1.55, 0.4); pulse.userData.patientId = patient.id; g.add(pulse); selectedPulse.current[patient.id] = pulse; }
     };
 
     departmentOrderForRooms.forEach((department) => {
       const room = roomMap.get(department); if (!room) return;
       const roomPatients = state.patients.filter(p => p.department === department && p.status !== 'Entlassung').slice(0, 6); for (let i = 0; i < 6; i++) createBed(room, i, roomPatients[i]);
       const staffHere = state.staff.filter(s => s.department === department && s.status !== 'Abwesend').slice(0, 2);
-      staffHere.forEach((s, idx) => { const ped = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.6, 5, 12), new THREE.MeshStandardMaterial({ color: 0x7ccfff, emissive: 0x14384d, emissiveIntensity: 0.35 })); ped.position.set((idx ? 1 : -1) * 2.0, 0.75, 2.1); ped.castShadow = true; room.add(ped); ped.userData.staffId = s.id; });
+      staffHere.forEach((s, idx) => { const ped = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.6, 5, 12), new THREE.MeshStandardMaterial({ color: 0x7ccfff, emissive: 0x14384d, emissiveIntensity: 0.35 })); ped.position.set((idx ? 1 : -1) * 2.0, 0.75, 2.1); ped.castShadow = true; ped.userData.staffId = s.id; room.add(ped); });
     });
 
     const walkLights = new THREE.Group(); scene.add(walkLights); for (let i = -24; i <= 24; i += 4) { const p = new THREE.PointLight(0x66c6ff, 1.7, 5); p.position.set(i, 2.5, 15.5); walkLights.add(p); }
@@ -119,14 +119,14 @@ function HospitalScene({ state, onPickPatient, onPickDepartment, muted, sound }:
     const onWheel = (event: WheelEvent) => { event.preventDefault(); target.current.zoom = clamp(target.current.zoom + event.deltaY * 0.02, 18, 44); };
     const onClick = (event: MouseEvent) => {
       const rect = renderer.domElement.getBoundingClientRect(); mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1; raycaster.setFromCamera(mouse, camera); const hits = raycaster.intersectObjects(base.children, true);
-      const picked = hits.find(hh => hh.object.userData.department || hh.object.userData.patientId); if (!picked) return;
-      const dept = (picked.object.userData.department ?? picked.object.parent?.userData.department) as Department | undefined; if (dept) { onPickDepartment(dept); sound.notification(); }
+      const patientHit = hits.find(hh => hh.object.userData.patientId !== undefined); if (patientHit) { const patient = state.patients.find(p => p.id === Number(patientHit.object.userData.patientId)); if (patient) { onPickPatient(patient); sound.notification(); return; } }
+      const picked = hits.find(hh => hh.object.userData.department); if (!picked) return; const dept = picked.object.userData.department as Department; onPickDepartment(dept); sound.notification();
     };
     renderer.domElement.addEventListener('pointerdown', onPointerDown); renderer.domElement.addEventListener('pointerup', onPointerUp); renderer.domElement.addEventListener('pointerleave', onPointerUp); renderer.domElement.addEventListener('pointermove', onPointerMove); renderer.domElement.addEventListener('wheel', onWheel, { passive: false }); renderer.domElement.addEventListener('click', onClick);
 
     let raf = 0; let lastT = performance.now();
     const tickScene = (now: number) => {
-      const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
+      const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now; void dt;
       const desiredY = 10 + target.current.zoom * Math.sin(target.current.tilt); const desiredZ = target.current.zoom * Math.cos(target.current.tilt); camera.position.x += ((target.current.x) - camera.position.x) * 0.08; camera.position.y += (desiredY - camera.position.y) * 0.08; camera.position.z += ((target.current.y + desiredZ) - camera.position.z) * 0.08; camera.lookAt(target.current.x * 0.35, 0, target.current.y * 0.35);
       base.children.forEach((room, idx) => { room.rotation.y = Math.sin(now * 0.00025 + idx) * 0.002; });
       Object.entries(selectedPulse.current).forEach(([id, obj], idx) => { const patient = state.patients.find(p => p.id === Number(id)); if (!patient || patient.status === 'Entlassung') return; const s = 1 + Math.sin(now * 0.005 + idx) * 0.25; obj.scale.setScalar(s); obj.position.y = 1.55 + Math.sin(now * 0.003 + idx) * 0.05; });
