@@ -1,0 +1,14 @@
+{
+  "name": "Krankenhaus",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+  "forwardPorts": [3001],
+  "portsAttributes": {
+    "3001": {
+      "label": "Krankenhaus-Spiel",
+      "onAutoForward": "openBrowser",
+      "protocol": "http"
+    }
+  },
+  "postCreateCommand": "npm install",
+  "postStartCommand": "bash .devcontainer/start.sh"
+}
