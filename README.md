@@ -1,53 +1,54 @@
-# Krankenhaus
+# Krankenhaus Simulation
 
-Eigenständige Multiplayer-Krankenhaus-Simulation. Die Krankenhauslogik wird zunächst vollständig separat entwickelt; eine Anbindung an eine Leitstelle oder ein externes Rettungsdienst-Spiel ist **nicht Bestandteil der aktuellen Entwicklung**.
+Eigenständige Multiplayer-Krankenhaus-Simulation. Das Projekt ist bewusst unabhängig von einer Leitstellen- oder Rettungsdienst-Spielrolle aufgebaut.
 
-## Aktueller Stand
+## Enthalten
 
-Die Web-App enthält bereits einen spielbaren Krankenhausleitstand mit:
-
-- zentralem Krankenhaus-Dashboard
-- Notaufnahme und Patientenübersicht
+- Serverautoritatives Echtzeit-Spiel mit Socket.IO
+- Mehrere gleichzeitig verbundene Spieler mit Krankenhaus-Rollen
+- Persistenter Spielzustand als JSON-Datei
+- Notaufnahme und unbegrenzte Patientenliste
 - Triage mit Rot/Gelb/Grün
-- Patientenakte mit Vitalwerten, Anamnese und klinischem Status
-- Behandlungs- und Dispositionsaktionen
-- Diagnostikaufträge für Labor, Radiologie, EKG, CT, MRT und Sonografie
-- Patientenaufnahme und stationärer Bettendisposition
-- OP-Vorbereitung, laufenden Operationen und OP-Abschluss
-- Stationen für Notaufnahme, Chirurgie, Innere Medizin, Anästhesie, Intensivstation, Radiologie, Kardiologie, Pädiatrie und Labor
-- Personalübersicht mit Ärzten, Pflege, MTRA, MTLA und Anästhesie
-- Personalanforderung innerhalb des Krankenhauses
-- zentrale Bettenverwaltung mit frei/belegt/Reinigung
-- Aufgabenliste und interne Prioritäten
-- Ereignis- und Simulationsprotokoll
-- laufende Uhr und Schichtdarstellung
-- responsive Oberfläche für Desktop und kleinere Displays
+- Patientenakten mit Vitalwerten, Bewusstsein, Schmerz, Allergien und Verlauf
+- Dynamische Prognose und Verschlechterung kritischer Patienten
+- Diagnostikaufträge für Labor und Radiologie
+- Behandlungen und Therapiedokumentation
+- Ärztliche und pflegerische Personalzuweisung
+- OP-Vorbereitung, OP-Start und OP-Abschluss mit Teamprüfung
+- Stationäre Aufnahme und Bettzuweisung
+- Bettenzustände: frei, belegt, Reinigung, gesperrt
+- Stationen: Notaufnahme, Chirurgie, Innere Medizin, Anästhesie, Intensivstation, Kardiologie, Pädiatrie, Radiologie, Labor, Apotheke und Hygiene
+- Abteilungsöffnung/-schließung
+- Schichtende und Personalstatus
+- Aufgabenverwaltung
+- Hausalarm
+- Echtzeit-Ereignisprotokoll
+- Krankenhaus-Dashboard mit Finanz- und Auslastungsdaten
+- Responsive Benutzeroberfläche
+- TypeScript-Checks, Produktions-Build und Vitest-Regressionstests in GitHub Actions
 
-## Geplante Krankenhaus-Simulation
+## Lokal starten
 
-Die nächsten Ausbaustufen bleiben vollständig auf das Krankenhaus konzentriert:
+```bash
+npm install
+npm run dev:full
+```
 
-1. serverseitig autoritative Multiplayer-Simulation für mehrere Krankenhausspieler
-2. Rollen und Berechtigungen innerhalb des Krankenhauses, z. B. Ärztlicher Dienst, Pflege, Leitung/Disposition und Diagnostik
-3. echte Echtzeit-Synchronisation zwischen Spielern
-4. persistente Patienten-, Personal-, Bett- und Stationszustände
-5. realistischere Krankheitsbilder, Diagnostik, Behandlungspfade und Verschlechterungen
-6. Stations- und Zimmerlogik mit Betten, Isolation, Reinigung und Verlegung
-7. OP-Planung mit Saal, Team, Anästhesie und Operationsfortschritt
-8. Personalplanung, Qualifikationen, Pausen, Ausfälle und Arbeitsbelastung
-9. Ressourcen wie Medikamente, Blutprodukte, Verbrauchsmaterial und Geräte
-10. innerklinische Notfälle, Reanimationen, Brände, technische Störungen und Massenanfall im Krankenhaus
-11. Aufnahmen, Entlassungen und innerklinische Transporte
-12. Statistik, Wirtschaft, Qualität, Auslastung und Tages-/Schichtauswertung
+Frontend: `http://localhost:5173`
 
-## Bewusste Abgrenzung
+Server: `http://localhost:3001`
 
-Keine Leitstellen-Spielerrolle, kein externer Leitstellen-Workflow und keine Abhängigkeit vom Leitstellen-Verbund in dieser Phase. Das Krankenhaus soll zuerst als eigenständiges, funktionierendes Multiplayer-Spiel stehen.
+Healthcheck: `http://localhost:3001/health`
 
-## Technische Basis
+## Produktion
 
-- React
-- Vite
-- TypeScript
+```bash
+npm run build
+npm run server
+```
 
-Der aktuelle Git-Stand ist ein Frontend-Simulationskern. Netzwerk- und persistente Serverlogik werden als nächste technische Ausbaustufe ergänzt und sind noch nicht als fertig produktiv getestet.
+Der Server lädt bei Start den persistenten Spielstand aus `data/hospital-state.json` und speichert während des Spiels regelmäßig.
+
+## Architektur
+
+Der Server besitzt den autoritativen Zustand. Clients senden Aktionen; der Server validiert und verändert den Zustand und verteilt danach den vollständigen aktuellen Zustand an alle verbundenen Spieler. Dadurch arbeiten alle Spieler im selben Krankenhaus und können sich gegenseitig in Echtzeit sehen.
