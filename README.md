@@ -2,6 +2,14 @@
 
 Eigenständige Multiplayer-Krankenhaus-Simulation. Das Projekt ist bewusst unabhängig von einer Leitstellen- oder Rettungsdienst-Spielrolle aufgebaut.
 
+## ▶ Spiel starten
+
+**Ohne npm lokal auf deinem PC einrichten zu müssen:**
+
+[**Krankenhaus in GitHub Codespaces starten**](https://github.com/codespaces/new?hide_repo_select=true&ref=main&repo=RazerFazer-lang%2FKrankenhaus)
+
+Codespaces startet das Projekt mit der vorbereiteten Umgebung. Der Server wird automatisch gestartet und der Spiel-Port 3001 wird als anklickbarer Browser-Link weitergeleitet.
+
 ## Enthalten
 
 - Serverautoritatives Echtzeit-Spiel mit Socket.IO
