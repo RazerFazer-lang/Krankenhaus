@@ -4,11 +4,23 @@ Eigenständige Multiplayer-Krankenhaus-Simulation. Das Projekt ist bewusst unabh
 
 ## ▶ Spiel starten
 
-**Ohne npm lokal auf deinem PC einrichten zu müssen:**
+**Ohne npm auf deinem PC installieren zu müssen:**
 
-[**Krankenhaus in GitHub Codespaces starten**](https://github.com/codespaces/new?hide_repo_select=true&ref=main&repo=RazerFazer-lang%2FKrankenhaus)
+[**🏥 Krankenhaus in GitHub Codespaces starten**](https://github.com/codespaces/new?hide_repo_select=true&ref=main&repo=RazerFazer-lang%2FKrankenhaus)
 
-Codespaces startet das Projekt mit der vorbereiteten Umgebung. Der Server wird automatisch gestartet und der Spiel-Port 3001 wird als anklickbarer Browser-Link weitergeleitet.
+Codespaces startet die vorbereitete Umgebung und stellt den Server-Port 3001 als anklickbaren Browser-Link bereit.
+
+### 2D-Klinik
+
+Die normale Klinikoberfläche erreichst du über `/`.
+
+### 3D-Klinik
+
+Die neue immersive Three.js-Version erreichst du über:
+
+[**🎮 3D-Krankenhaus öffnen**](./3d.html)
+
+Die 3D-Version enthält einen räumlichen Klinikgrundriss, 3D-Räume und Betten, Patienten-/Personalobjekte, Kamerasteuerung, dynamische Beleuchtung und Web-Audio-Effekte für Ereignisse, Benachrichtigungen und Hausalarm.
 
 ## Enthalten
 
@@ -32,7 +44,9 @@ Codespaces startet das Projekt mit der vorbereiteten Umgebung. Der Server wird a
 - Hausalarm
 - Echtzeit-Ereignisprotokoll
 - Krankenhaus-Dashboard mit Finanz- und Auslastungsdaten
-- Responsive Benutzeroberfläche
+- Interaktive 2D-Klinikoberfläche
+- Immersive 3D-Klinikoberfläche
+- Dynamische Web-Audio-Effekte
 - TypeScript-Checks, Produktions-Build und Vitest-Regressionstests in GitHub Actions
 
 ## Lokal starten
@@ -45,6 +59,8 @@ npm run dev:full
 Frontend: `http://localhost:5173`
 
 Server: `http://localhost:3001`
+
+3D: `http://localhost:5173/3d.html`
 
 Healthcheck: `http://localhost:3001/health`
 
