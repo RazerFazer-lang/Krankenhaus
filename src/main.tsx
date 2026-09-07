@@ -1,232 +1,42 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { io, type Socket } from 'socket.io-client';
 import './styles.css';
+import type { ClientAction, HospitalState, Patient, PlayerRole, Priority, Department, StaffRole, VitalSigns } from './types';
 
-type Priority = 'Rot' | 'Gelb' | 'Grün';
-type PatientStatus = 'Wartebereich' | 'Triage' | 'Diagnostik' | 'Behandlung' | 'OP-Vorbereitung' | 'OP' | 'Stationär' | 'Entlassung';
-type Department = 'Notaufnahme' | 'Chirurgie' | 'Innere Medizin' | 'Anästhesie' | 'Intensivstation' | 'Radiologie' | 'Kardiologie' | 'Pädiatrie' | 'Labor';
-
-type Patient = {
-  id: number;
-  name: string;
-  age: number;
-  condition: string;
-  priority: Priority;
-  status: PatientStatus;
-  department: Department;
-  arrival: number;
-  pulse: number;
-  systolic: number;
-  spo2: number;
-  temperature: number;
-  pain: number;
-  notes: string;
-  tests: string[];
-};
-
-type Staff = { id: number; name: string; role: string; department: Department; status: 'Im Dienst' | 'Behandlung' | 'OP' | 'Pause'; patient?: number };
-type Bed = { id: string; department: Department; patient?: number; status: 'Frei' | 'Belegt' | 'Reinigung' };
-type Task = { id: number; label: string; detail: string; done: boolean; priority: Priority };
-
-const now = Date.now();
-const initialPatients: Patient[] = [
-  { id: 1042, name: 'Patient #1042', age: 67, condition: 'Akutes Koronarsyndrom', priority: 'Rot', status: 'Diagnostik', department: 'Kardiologie', arrival: now - 14 * 60000, pulse: 108, systolic: 92, spo2: 94, temperature: 37.4, pain: 8, notes: 'Druckschmerz retrosternal, seit ca. 35 Minuten. EKG dringend.', tests: ['EKG', 'Troponin'] },
-  { id: 1043, name: 'Patient #1043', age: 34, condition: 'Unterarmfraktur', priority: 'Gelb', status: 'Behandlung', department: 'Chirurgie', arrival: now - 31 * 60000, pulse: 88, systolic: 128, spo2: 99, temperature: 36.8, pain: 7, notes: 'Sturz. Deformität am rechten Unterarm.', tests: ['Röntgen Unterarm'] },
-  { id: 1044, name: 'Patient #1044', age: 22, condition: 'Synkope', priority: 'Grün', status: 'Wartebereich', department: 'Innere Medizin', arrival: now - 9 * 60000, pulse: 76, systolic: 119, spo2: 99, temperature: 36.7, pain: 1, notes: 'Kurzer Bewusstseinsverlust, aktuell wach und orientiert.', tests: [] },
-  { id: 1045, name: 'Patient #1045', age: 6, condition: 'Fieber / Exsikkose', priority: 'Gelb', status: 'Triage', department: 'Pädiatrie', arrival: now - 6 * 60000, pulse: 132, systolic: 101, spo2: 97, temperature: 39.2, pain: 3, notes: 'Kind mit hohem Fieber und reduzierter Trinkmenge.', tests: ['Blutbild'] },
-];
-
-const initialStaff: Staff[] = [
-  { id: 1, name: 'Dr. Weber', role: 'Oberarzt', department: 'Notaufnahme', status: 'Behandlung', patient: 1042 },
-  { id: 2, name: 'Dr. Kaya', role: 'Assistenzarzt', department: 'Innere Medizin', status: 'Im Dienst' },
-  { id: 3, name: 'Dr. Lehmann', role: 'Facharzt Chirurgie', department: 'Chirurgie', status: 'Behandlung', patient: 1043 },
-  { id: 4, name: 'Dr. Santos', role: 'Anästhesist', department: 'Anästhesie', status: 'Im Dienst' },
-  { id: 5, name: 'M. Fischer', role: 'Pflegefachkraft', department: 'Notaufnahme', status: 'Im Dienst' },
-  { id: 6, name: 'L. Hahn', role: 'Pflegefachkraft', department: 'Intensivstation', status: 'Im Dienst' },
-  { id: 7, name: 'K. Brandt', role: 'MTRA', department: 'Radiologie', status: 'Im Dienst' },
-  { id: 8, name: 'J. Vogt', role: 'MTLA', department: 'Labor', status: 'Im Dienst' },
-];
-
-const initialBeds: Bed[] = [
-  ...Array.from({ length: 8 }, (_, i) => ({ id: `NA-${i + 1}`, department: 'Notaufnahme' as Department, status: i < 4 ? 'Belegt' as const : 'Frei' as const, patient: i === 0 ? 1042 : i === 1 ? 1043 : i === 2 ? 1045 : undefined })),
-  ...Array.from({ length: 10 }, (_, i) => ({ id: `INT-${i + 1}`, department: 'Innere Medizin' as Department, status: i < 6 ? 'Belegt' as const : 'Frei' as const })),
-  ...Array.from({ length: 8 }, (_, i) => ({ id: `CH-${i + 1}`, department: 'Chirurgie' as Department, status: i < 4 ? 'Belegt' as const : 'Frei' as const })),
-  ...Array.from({ length: 6 }, (_, i) => ({ id: `ITS-${i + 1}`, department: 'Intensivstation' as Department, status: i < 2 ? 'Belegt' as const : 'Frei' as const })),
-];
-
-const initialTasks: Task[] = [
-  { id: 1, label: 'EKG bei Patient #1042 auswerten', detail: 'Kardiologie · Rot', done: false, priority: 'Rot' },
-  { id: 2, label: 'Röntgen Patient #1043 prüfen', detail: 'Radiologie · Gelb', done: false, priority: 'Gelb' },
-  { id: 3, label: 'Blutbild Patient #1045 anfordern', detail: 'Labor · Gelb', done: false, priority: 'Gelb' },
-  { id: 4, label: 'Freies Bett für Innere Medizin reservieren', detail: 'Station · Planung', done: false, priority: 'Grün' },
-];
-
-const departments: { name: Department; type: string; capacity: number }[] = [
-  { name: 'Notaufnahme', type: 'Akutversorgung', capacity: 8 },
-  { name: 'Chirurgie', type: 'Station / OP', capacity: 8 },
-  { name: 'Innere Medizin', type: 'Station', capacity: 10 },
-  { name: 'Anästhesie', type: 'OP / Intensiv', capacity: 6 },
-  { name: 'Intensivstation', type: 'Intensivmedizin', capacity: 6 },
-  { name: 'Radiologie', type: 'Diagnostik', capacity: 4 },
-  { name: 'Kardiologie', type: 'Herzmedizin', capacity: 6 },
-  { name: 'Pädiatrie', type: 'Kinder', capacity: 6 },
-  { name: 'Labor', type: 'Diagnostik', capacity: 3 },
-];
-
-const priorityOrder: Record<Priority, number> = { Rot: 0, Gelb: 1, Grün: 2 };
-
-function clock(ts = Date.now()) {
-  return new Date(ts).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+type AppSocket = Socket;
+const roles: PlayerRole[] = ['Ärztlicher Dienst','Pflegedienst','OP-Team','Aufnahme','Verwaltung'];
+const nav = ['Übersicht','Patienten','Stationen','Diagnostik','OP','Personal','Betten','Aufgaben','Ereignisse'];
+const priorities: Priority[] = ['Rot','Gelb','Grün'];
+function clock(ts:number){return new Date(ts).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit',second:'2-digit'});}
+function Kpi({label,value,hint,critical=false}:{label:string;value:string|number;hint:string;critical?:boolean}){return <div className={`kpi ${critical?'critical':''}`}><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>}
+function Progress({value}:{value:number}){return <div className="progress"><i style={{width:`${Math.max(0,Math.min(100,value))}%`}}/></div>}
+function App(){
+ const [socket]=useState<AppSocket>(()=>io(window.location.origin,{autoConnect:false}));
+ const [state,setState]=useState<HospitalState|null>(null); const [section,setSection]=useState('Übersicht'); const [selected,setSelected]=useState(1042); const [name,setName]=useState('Spieler'); const [role,setRole]=useState<PlayerRole>('Ärztlicher Dienst'); const [joined,setJoined]=useState(false); const [filter,setFilter]=useState<'Alle'|Priority>('Alle'); const [notice,setNotice]=useState('');
+ const [diag,setDiag]=useState(''); const [treatment,setTreatment]=useState(''); const [test,setTest]=useState(''); const [operation,setOperation]=useState(''); const [vitals,setVitals]=useState<Partial<VitalSigns>>({});
+ useEffect(()=>{const onState=(s:HospitalState)=>setState(s);const onNotice=(m:string)=>{setNotice(m);window.setTimeout(()=>setNotice(''),2500)};const onError=(m:string)=>{setNotice(`Fehler: ${m}`);window.setTimeout(()=>setNotice(''),3500)};socket.on('state',onState);socket.on('notice',onNotice);socket.on('error',onError);return()=>{socket.off('state',onState);socket.off('notice',onNotice);socket.off('error',onError);socket.disconnect();}},[socket]);
+ const act=(a:ClientAction)=>socket.emit('action',a); const join=()=>{socket.connect();socket.emit('join',{name:name.trim().slice(0,32)||'Spieler',role});setJoined(true)};
+ const patients=state?.patients??[],staff=state?.staff??[],beds=state?.beds??[],tasks=state?.tasks??[],events=state?.events??[],deps=state?.departments??[]; const p=patients.find(x=>x.id===selected);
+ const visible=useMemo(()=>patients.filter(x=>filter==='Alle'||x.priority===filter).sort((a,b)=>({Rot:0,Gelb:1,Grün:2}[a.priority]-{Rot:0,Gelb:1,Grün:2}[b.priority])||a.arrival-b.arrival),[patients,filter]);
+ const freeBeds=beds.filter(x=>x.status==='Frei').length, occupied=beds.filter(x=>x.status==='Belegt').length, critical=patients.filter(x=>x.priority==='Rot'&&x.status!=='Entlassung').length, ops=patients.filter(x=>x.status==='OP').length;
+ if(!joined||!state)return <div className="login"><div className="login-card"><div className="brandmark big">+</div><span className="eyebrow">HOSPITAL SIMULATION</span><h1>Krankenhaus betreten</h1><p>Eigenständige Krankenhaus-Simulation mit serverseitiger Mehrspieler-Synchronisation.</p><label>Name<input value={name} onChange={e=>setName(e.target.value)} maxLength={32}/></label><label>Rolle<select value={role} onChange={e=>setRole(e.target.value as PlayerRole)}>{roles.map(r=><option key={r}>{r}</option>)}</select></label><button className="primary wide" onClick={join}>Krankenhaus betreten</button></div></div>;
+ return <div className="app"><header className="topbar"><div className="brand"><div className="brandmark">+</div><div><strong>KRANKENHAUS</strong><span>Multiplayer Hospital Simulation</span></div></div><div className="topstatus"><span className="live"><i/> LIVE</span><span>Tag {state.day} · {clock(state.time)}</span><span>{state.weather}</span><span>€ {Math.round(state.money).toLocaleString('de-DE')}</span><span>{state.players.length} Spieler</span></div></header>
+ <nav className="nav">{nav.map(x=><button className={section===x?'active':''} onClick={()=>setSection(x)} key={x}>{x}</button>)}</nav>{notice&&<div className="toast">{notice}</div>}
+ <main className="content"><div className="pagehead"><div><span className="eyebrow">KRANKENHAUS · TAG {state.day}</span><h1>{section}</h1><p>Spieler: <b>{name}</b> · {role}. Alle Aktionen werden in Echtzeit geteilt.</p></div><div className="headactions"><button className="primary" onClick={()=>act({type:'createPatient'})}>+ Patient aufnehmen</button><button onClick={()=>act({type:'houseAlarm'})}>Hausalarm</button></div></div>
+ {section==='Übersicht'&&<><div className="kpis"><Kpi label="AKUTPATIENTEN" value={patients.filter(x=>x.status!=='Entlassung').length} hint={`${critical} kritisch`} critical={critical>0}/><Kpi label="BETTEN" value={`${freeBeds} frei`} hint={`${occupied} belegt`}/><Kpi label="PERSONAL" value={staff.filter(x=>x.status!=='Abwesend').length} hint={`${staff.filter(x=>x.status==='Im Dienst').length} verfügbar`}/><Kpi label="OP" value={ops} hint="laufend"/></div><div className="grid two"><section className="panel"><div className="panelhead"><h2>Akute Patienten</h2><button onClick={()=>setSection('Patienten')}>Alle anzeigen</button></div>{visible.slice(0,7).map(x=><PatientRow key={x.id} p={x} selected={selected===x.id} onClick={()=>{setSelected(x.id);setSection('Patienten')}}/>)}</section><section className="panel"><div className="panelhead"><h2>Offene Aufgaben</h2><button onClick={()=>setSection('Aufgaben')}>{tasks.filter(x=>!x.done).length} offen</button></div>{tasks.filter(x=>!x.done).slice(0,7).map(t=><TaskRow key={t.id} task={t} onToggle={()=>act({type:'toggleTask',taskId:t.id})}/>)}</section></div><div className="grid three"><section className="panel"><div className="panelhead"><h2>Stationen</h2></div>{deps.slice(0,7).map(d=><div className="dep" key={d.name}><div><b>{d.name}</b><small>{d.staff} Personal · {d.demand} Patienten</small></div><div><span className={d.open?'ok':'bad'}>{d.open?'OFFEN':'ZU'}</span><small>{d.occupancy}/{d.capacity}</small></div></div>)}</section><section className="panel"><div className="panelhead"><h2>Spieler online</h2></div>{state.players.map(pl=><div className="playerrow" key={pl.id}><i/><div><b>{pl.name}</b><small>{pl.role}</small></div><span>online</span></div>)}</section><section className="panel"><div className="panelhead"><h2>System</h2></div><Status label="Server" value="Aktiv"/><Status label="Persistenz" value="Aktiv"/><Status label="Echtzeit-Sync" value="Aktiv"/><Status label="Simulation" value="Aktiv"/></section></div></>}
+ {section==='Patienten'&&<div className="patient-layout"><section className="panel"><div className="panelhead"><h2>Patienten</h2><div className="filters"><button className={filter==='Alle'?'sel':''} onClick={()=>setFilter('Alle')}>Alle</button>{priorities.map(x=><button key={x} className={filter===x?'sel':''} onClick={()=>setFilter(x)}>{x}</button>)}</div></div>{visible.map(x=><PatientRow key={x.id} p={x} selected={selected===x.id} onClick={()=>setSelected(x.id)}/>)}</section><PatientDetail p={p} act={act} diag={diag} setDiag={setDiag} treatment={treatment} setTreatment={setTreatment} test={test} setTest={setTest} operation={operation} setOperation={setOperation} vitals={vitals} setVitals={setVitals}/></div>}
+ {section==='Stationen'&&<DepartmentPanel deps={deps} act={act}/>} {section==='Diagnostik'&&<DiagnosticPanel patients={patients} tasks={tasks} act={act}/>} {section==='OP'&&<OperationPanel patients={patients} act={act}/>} {section==='Personal'&&<StaffPanel staff={staff} act={act}/>} {section==='Betten'&&<BedsPanel beds={beds} patients={patients} act={act}/>} {section==='Aufgaben'&&<TasksPanel tasks={tasks} act={act}/>} {section==='Ereignisse'&&<EventsPanel events={events}/>}</main></div>;
 }
-
-function App() {
-  const [patients, setPatients] = useState<Patient[]>(initialPatients);
-  const [staff, setStaff] = useState<Staff[]>(initialStaff);
-  const [beds, setBeds] = useState<Bed[]>(initialBeds);
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
-  const [selected, setSelected] = useState(1042);
-  const [section, setSection] = useState('Übersicht');
-  const [filter, setFilter] = useState<'Alle' | Priority>('Alle');
-  const [events, setEvents] = useState<string[]>([
-    '08:52 · Laborauftrag #L-381 gestartet',
-    '08:50 · Patient #1045 in Triage aufgenommen',
-    '08:47 · Patient #1043 zur Radiologie angekündigt',
-    '08:41 · Patient #1042 benötigt sofortige kardiologische Beurteilung',
-  ]);
-  const [simTime, setSimTime] = useState(Date.now());
-  const [message, setMessage] = useState('');
-
-  useEffect(() => {
-    const id = window.setInterval(() => setSimTime(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, []);
-
-  const selectedPatient = useMemo(() => patients.find(p => p.id === selected), [patients, selected]);
-  const visiblePatients = useMemo(() => patients.filter(p => filter === 'Alle' || p.priority === filter).sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority] || a.arrival - b.arrival), [patients, filter]);
-  const freeBeds = beds.filter(b => b.status === 'Frei').length;
-  const occupiedBeds = beds.filter(b => b.status === 'Belegt').length;
-  const opRunning = patients.filter(p => p.status === 'OP').length;
-  const critical = patients.filter(p => p.priority === 'Rot' && p.status !== 'Entlassung').length;
-
-  function log(text: string) {
-    setEvents(e => [`${clock()} · ${text}`, ...e].slice(0, 12));
-    setMessage(text);
-    window.setTimeout(() => setMessage(''), 2600);
-  }
-
-  function addPatient() {
-    const id = Math.max(...patients.map(p => p.id), 1041) + 1;
-    const patient: Patient = { id, name: `Patient #${id}`, age: 49, condition: 'Akuter Notfall', priority: 'Gelb', status: 'Wartebereich', department: 'Notaufnahme', arrival: Date.now(), pulse: 92, systolic: 124, spo2: 98, temperature: 37.1, pain: 4, notes: 'Neu eingetroffener Patient. Anamnese ausstehend.', tests: [] };
-    setPatients(p => [patient, ...p]);
-    setSelected(id);
-    log(`Neuer Patient #${id} in der Notaufnahme aufgenommen`);
-  }
-
-  function updateSelected(patch: Partial<Patient>, text: string) {
-    if (!selectedPatient) return;
-    setPatients(list => list.map(p => p.id === selectedPatient.id ? { ...p, ...patch } : p));
-    log(text);
-  }
-
-  function orderTest(test: string, department: Department) {
-    updateSelected({ tests: [...(selectedPatient?.tests ?? []), test], status: 'Diagnostik', department }, `${test} für ${selectedPatient?.name} angefordert`);
-  }
-
-  function admit() {
-    if (!selectedPatient) return;
-    const target = beds.find(b => b.status === 'Frei' && b.department === selectedPatient.department) ?? beds.find(b => b.status === 'Frei');
-    if (!target) return log('Keine freien stationären Betten verfügbar');
-    setBeds(list => list.map(b => b.id === target.id ? { ...b, status: 'Belegt', patient: selectedPatient.id } : b));
-    updateSelected({ status: 'Stationär', department: target.department }, `${selectedPatient.name} auf ${target.department} aufgenommen · Bett ${target.id}`);
-  }
-
-  function prepareOperation() {
-    if (!selectedPatient) return;
-    updateSelected({ status: 'OP-Vorbereitung', department: 'Chirurgie' }, `${selectedPatient.name} für OP vorbereitet`);
-    setTasks(t => [{ id: Date.now(), label: `OP-Vorbereitung ${selectedPatient.name}`, detail: 'Chirurgie / Anästhesie', done: false, priority: selectedPatient.priority }, ...t]);
-  }
-
-  function startOperation() {
-    if (!selectedPatient) return;
-    updateSelected({ status: 'OP', department: 'Chirurgie' }, `${selectedPatient.name}: Operation gestartet`);
-    setStaff(list => list.map(s => s.role.includes('Chirurgie') || s.role === 'Anästhesist' ? { ...s, status: 'OP', patient: selectedPatient.id } : s));
-  }
-
-  function finishTreatment() {
-    if (!selectedPatient) return;
-    updateSelected({ status: 'Entlassung', department: 'Notaufnahme' }, `${selectedPatient.name} zur Entlassung freigegeben`);
-    setBeds(list => list.map(b => b.patient === selectedPatient.id ? { ...b, patient: undefined, status: 'Reinigung' } : b));
-  }
-
-  function toggleTask(id: number) {
-    const task = tasks.find(t => t.id === id);
-    setTasks(list => list.map(t => t.id === id ? { ...t, done: !t.done } : t));
-    if (task) log(`${task.done ? 'Aufgabe wieder geöffnet' : 'Aufgabe abgeschlossen'}: ${task.label}`);
-  }
-
-  function callStaff(role: string) {
-    const free = staff.find(s => s.role.toLowerCase().includes(role.toLowerCase()) && s.status === 'Im Dienst');
-    if (!free) return log(`Kein freier ${role} verfügbar`);
-    setStaff(list => list.map(s => s.id === free.id ? { ...s, status: 'Behandlung', patient: selectedPatient?.id } : s));
-    log(`${free.name} (${free.role}) wurde in die Behandlung gerufen`);
-  }
-
-  const pageTitle = section === 'Übersicht' ? 'Krankenhausleitstand' : section;
-
-  return (
-    <main className="app">
-      <header className="topbar">
-        <div className="brand"><div className="brandmark">+</div><div><strong>KRANKENHAUS</strong><span>Hospital Simulation</span></div></div>
-        <div className="topstatus"><span className="live"><i /> LIVE</span><span>{clock(simTime)}</span><span>Schicht 06:00–14:00</span><span className="player">Mehrspieler bereit · 3 Spieler</span></div>
-      </header>
-
-      <nav className="nav">
-        {['Übersicht', 'Patienten', 'Stationen', 'Diagnostik', 'OP', 'Personal', 'Betten', 'Ereignisse'].map(item => <button className={section === item ? 'active' : ''} onClick={() => setSection(item)} key={item}>{item}</button>)}
-      </nav>
-
-      {message && <div className="toast">{message}</div>}
-
-      <section className="content">
-        <div className="pagehead"><div><span className="eyebrow">KRANKENHAUS · ZENTRALE</span><h1>{pageTitle}</h1><p>Personal, Patienten und Ressourcen in Echtzeit steuern.</p></div><div className="headactions"><button onClick={addPatient} className="primary">+ Notfallpatient</button><button onClick={() => log('Hausalarm ausgelöst · Alle Abteilungen informiert')}>Hausalarm</button></div></div>
-
-        {section === 'Übersicht' && <>
-          <section className="kpis">
-            <Kpi label="NOTAUFNAHME" value={patients.filter(p => ['Wartebereich', 'Triage', 'Diagnostik', 'Behandlung'].includes(p.status)).length} hint="aktuelle Patienten" accent="red" />
-            <Kpi label="KRITISCH" value={critical} hint="sofortige Aufmerksamkeit" accent="orange" />
-            <Kpi label="BETTEN FREI" value={freeBeds} hint={`${occupiedBeds} belegt · ${beds.length} gesamt`} accent="blue" />
-            <Kpi label="OP-SÄLE" value={`${opRunning}/4`} hint="Operationen laufend" accent="violet" />
-            <Kpi label="PERSONAL" value={`${staff.filter(s => s.status !== 'Pause').length}/${staff.length}`} hint="aktuell im Haus" accent="green" />
-          </section>
-
-          <div className="dashboard-grid">
-            <section className="panel patientpanel"><div className="paneltitle"><div><span>AKUTBEREICH</span><h2>Patientenübersicht</h2></div><div className="filters">{(['Alle', 'Rot', 'Gelb', 'Grün'] as const).map(f => <button key={f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>{f}</button>)}</div></div><div className="patient-table">{visiblePatients.map(p => <button key={p.id} className={`prow ${selected === p.id ? 'selected' : ''}`} onClick={() => { setSelected(p.id); setSection('Patienten'); }}><span className={`dot ${p.priority.toLowerCase()}`} /><span className="pmain"><strong>{p.name}</strong><small>{p.age} J. · {p.condition}</small></span><span className="pdept">{p.department}</span><span className="pstatus">{p.status}</span><span className="arrive">{Math.max(1, Math.floor((simTime - p.arrival) / 60000))} min</span></button>)}</div></section>
-            <section className="panel"><PanelTitle title="Aufgaben" subtitle="Offene Entscheidungen" /><div className="tasklist">{tasks.map(t => <button key={t.id} className={`task ${t.done ? 'done' : ''}`} onClick={() => toggleTask(t.id)}><span className={`dot ${t.priority.toLowerCase()}`} /><span><strong>{t.label}</strong><small>{t.detail}</small></span><b>{t.done ? '✓' : '›'}</b></button>)}</div></section>
-            <section className="panel"><PanelTitle title="Abteilungen" subtitle="Auslastung & Status" /><div className="departments">{departments.slice(0, 6).map(d => { const used = beds.filter(b => b.department === d.name && b.status === 'Belegt').length; const total = beds.filter(b => b.department === d.name).length || d.capacity; const percent = Math.min(100, Math.round(used / total * 100)); return <div className="dept" key={d.name}><div><strong>{d.name}</strong><span>{d.type}</span></div><div className="bar"><i style={{ width: `${percent}%` }} /></div><em>{percent}%</em></div>; })}</div></section>
-            <section className="panel"><PanelTitle title="Ereignisse" subtitle="Letzte Aktivitäten" /><div className="eventlist">{events.slice(0, 7).map((e, i) => <p key={i}><i />{e}</p>)}</div></section>
-          </div>
-        </>}
-
-        {section === 'Patienten' && <section className="two-col"><section className="panel"><PanelTitle title="Patientenakte" subtitle="Klinische Übersicht" />{selectedPatient && <div className="patientdetail"><div className="identity"><div className={`bigpriority ${selectedPatient.priority.toLowerCase()}`}>{selectedPatient.priority[0]}</div><div><h2>{selectedPatient.name}</h2><p>{selectedPatient.age} Jahre · {selectedPatient.condition}</p></div><span className={`badge ${selectedPatient.priority.toLowerCase()}`}>{selectedPatient.priority}</span></div><div className="vitals"><Vital n="Puls" v={`${selectedPatient.pulse}`} u="/min" /><Vital n="RR" v={`${selectedPatient.systolic}`} u="mmHg" /><Vital n="SpO₂" v={`${selectedPatient.spo2}`} u="%" /><Vital n="Temp." v={selectedPatient.temperature.toFixed(1)} u="°C" /><Vital n="Schmerz" v={`${selectedPatient.pain}`} u="/10" /></div><div className="info-grid"><Info label="Status" value={selectedPatient.status} /><Info label="Abteilung" value={selectedPatient.department} /><Info label="Aufnahme" value={`${clock(selectedPatient.arrival)} · vor ${Math.max(1, Math.floor((simTime - selectedPatient.arrival) / 60000))} min`} /><Info label="Versicherung" value="Gesetzlich" /></div><div className="notes"><span>ANAMNESE / NOTIZEN</span><p>{selectedPatient.notes}</p></div><div className="actiongrid"><button onClick={() => updateSelected({ status: 'Triage' }, `${selectedPatient.name}: Triage durchgeführt`)}>Triage</button><button onClick={() => callStaff('arzt')}>Arzt rufen</button><button onClick={() => orderTest('Labor', 'Labor')}>Labor</button><button onClick={() => orderTest('Bildgebung', 'Radiologie')}>Bildgebung</button><button onClick={prepareOperation}>OP vorbereiten</button><button onClick={startOperation} className="warning">OP starten</button><button onClick={admit} className="primary">Station aufnehmen</button><button onClick={finishTreatment}>Entlassung</button></div><div className="orders"><h3>Diagnostik & Aufträge</h3>{selectedPatient.tests.length === 0 ? <p className="muted">Noch keine Aufträge.</p> : selectedPatient.tests.map((t, i) => <div key={`${t}-${i}`}><span>{t}</span><em>angefordert · in Arbeit</em></div>)}</div></div>}</section><section className="panel"><PanelTitle title="Patientenliste" subtitle="Auswahl" />{patients.map(p => <button className={`sidepatient ${selected === p.id ? 'selected' : ''}`} key={p.id} onClick={() => setSelected(p.id)}><span className={`dot ${p.priority.toLowerCase()}`} /><div><strong>{p.name}</strong><small>{p.condition}</small></div><em>{p.status}</em></button>)}</section></section>}
-
-        {section === 'Stationen' && <section className="cardgrid">{departments.map(d => <section className="panel station" key={d.name}><div className="station-head"><div><span>{d.type}</span><h2>{d.name}</h2></div><span className="statusdot">● offen</span></div><div className="stationstats"><div><b>{beds.filter(b => b.department === d.name && b.status === 'Belegt').length}</b><span>belegt</span></div><div><b>{beds.filter(b => b.department === d.name && b.status === 'Frei').length}</b><span>frei</span></div><div><b>{staff.filter(s => s.department === d.name).length}</b><span>Personal</span></div></div><div className="bar large"><i style={{ width: `${Math.min(100, beds.filter(b => b.department === d.name && b.status === 'Belegt').length / (beds.filter(b => b.department === d.name).length || 1) * 100)}%` }} /></div><button onClick={() => log(`${d.name}: Stationsübersicht geöffnet`)}>Öffnen</button></section>)}</section>}
-
-        {section === 'Diagnostik' && <section className="diagnostics"><section className="panel"><PanelTitle title="Diagnostikzentrum" subtitle="Aufträge und Geräte" />{['Labor', 'Radiologie', 'EKG / Funktion', 'CT', 'MRT', 'Sonografie'].map((d, i) => <div className="diagrow" key={d}><span className="diagicon">{['L', 'R', 'E', 'C', 'M', 'S'][i]}</span><div><strong>{d}</strong><small>{i === 0 ? '3 Aufträge · 1 in Bearbeitung' : i === 1 ? '2 Aufträge · 1 Gerät frei' : 'Bereit'}</small></div><span className="greencheck">●</span><button onClick={() => log(`${d}: neuer Auftrag geöffnet`)}>Aufträge</button></div>)}</section><section className="panel"><PanelTitle title="Befunde" subtitle="Zu prüfen" />{patients.filter(p => p.tests.length).map(p => <div className="result" key={p.id}><div><strong>{p.name}</strong><small>{p.tests.join(' · ')}</small></div><button onClick={() => { setSelected(p.id); setSection('Patienten'); }}>Patientenakte</button></div>)}</section></section>}
-
-        {section === 'OP' && <section className="opgrid">{[1, 2, 3, 4].map(n => { const p = patients.find(x => x.status === 'OP' && x.id % 4 === n - 1); return <section className="panel oroom" key={n}><div className="roomhead"><div><span>OP-Saal</span><h2>OP {n}</h2></div><span className={p ? 'statusbusy' : 'statusfree'}>{p ? 'IN BETRIEB' : 'BEREIT'}</span></div>{p ? <><div className="oppatient"><strong>{p.name}</strong><span>{p.condition}</span></div><div className="opprogress"><div className="bar large"><i style={{ width: '58%' }} /></div><span>58% · laufende Operation</span></div><button onClick={() => { setSelected(p.id); finishTreatment(); }}>OP abschließen</button></> : <div className="emptyroom">Saal frei<br /><small>Anästhesie und OP-Team verfügbar</small></div>}</section>})}</section>}
-
-        {section === 'Personal' && <section className="two-col"><section className="panel"><PanelTitle title="Personalübersicht" subtitle="Schicht 06:00–14:00" />{staff.map(s => <div className="staffrow" key={s.id}><div className="avatar">{s.name.split(' ').map(x => x[0]).join('').slice(0,2)}</div><div><strong>{s.name}</strong><small>{s.role} · {s.department}</small></div><span className={`staffstatus ${s.status.toLowerCase().replace(' ', '-')}`}>{s.status}</span><em>{s.patient ? `#${s.patient}` : '—'}</em></div>)}</section><section className="panel"><PanelTitle title="Personalanforderung" subtitle="Interne Disposition" />{['Arzt', 'Pflegefachkraft', 'MTRA', 'MTLA', 'Anästhesist'].map(r => <button className="callrow" key={r} onClick={() => callStaff(r)}><span>+</span><div><strong>{r}</strong><small>Verfügbarkeit prüfen und anfordern</small></div><b>›</b></button>)}</section></section>}
-
-        {section === 'Betten' && <section className="panel"><PanelTitle title="Bettenverwaltung" subtitle="Belegung, Reinigung und Verfügbarkeit" /><div className="bedstats"><Kpi label="GESAMT" value={beds.length} hint="Betten" accent="blue" /><Kpi label="BELEGT" value={occupiedBeds} hint="stationär" accent="red" /><Kpi label="FREI" value={freeBeds} hint="sofort nutzbar" accent="green" /><Kpi label="REINIGUNG" value={beds.filter(b => b.status === 'Reinigung').length} hint="Wiederaufbereitung" accent="orange" /></div><div className="bedtable">{beds.map(b => <div key={b.id} className="bedrow"><strong>{b.id}</strong><span>{b.department}</span><span className={`bedstatus ${b.status.toLowerCase()}`}>{b.status}</span><em>{b.patient ? `Patient #${b.patient}` : '—'}</em>{b.status === 'Reinigung' && <button onClick={() => { setBeds(list => list.map(x => x.id === b.id ? { ...x, status: 'Frei' } : x)); log(`Bett ${b.id} ist wieder verfügbar`); }}>Freigeben</button>}</div>)}</div></section>}
-
-        {section === 'Ereignisse' && <section className="two-col"><section className="panel"><PanelTitle title="Ereignisprotokoll" subtitle="Server- und Klinikereignisse" />{events.concat(['08:36 · Schichtübergabe abgeschlossen', '08:30 · Station Innere Medizin meldet 4 freie Betten']).map((e, i) => <div className="logrow" key={`${e}-${i}`}><span>{e.slice(0, 5)}</span><div><strong>{e.slice(7)}</strong><small>Systemereignis · gespeichert</small></div></div>)}</section><section className="panel"><PanelTitle title="Simulation" subtitle="Aktuelle Umgebung" /><div className="simstate"><Info label="Datum" value={new Date(simTime).toLocaleDateString('de-DE')} /><Info label="Zeit" value={clock(simTime)} /><Info label="Schicht" value="Frühdienst" /><Info label="Server" value="Online · autoritativ" /><Info label="Spieler" value="3 im Krankenhaus" /><Info label="Eskalationen" value={`${critical} kritisch`} /></div><button className="danger" onClick={() => log('Test-Ereignis ausgelöst · Alle beteiligten Abteilungen erhalten Meldung')}>Test-Ereignis auslösen</button></section></section>}
-      </section>
-    </main>
-  );
-}
-
-function PanelTitle({ title, subtitle }: { title: string; subtitle: string }) { return <div className="paneltitle"><div><span>{subtitle}</span><h2>{title}</h2></div></div>; }
-function Kpi({ label, value, hint, accent }: { label: string; value: React.ReactNode; hint: string; accent: string }) { return <div className={`kpi ${accent}`}><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>; }
-function Vital({ n, v, u }: { n: string; v: string; u: string }) { return <div><span>{n}</span><strong>{v}</strong><small>{u}</small></div>; }
-function Info({ label, value }: { label: string; value: string }) { return <div><span>{label}</span><strong>{value}</strong></div>; }
-
-createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);
+function PatientRow({p,selected,onClick}:{p:Patient;selected:boolean;onClick:()=>void}){return <button className={`patient-row ${selected?'selected':''}`} onClick={onClick}><span className={`dot ${p.priority.toLowerCase()}`}/><div><b>{p.name}</b><small>{p.age} Jahre · {p.condition}</small></div><div className="rowmeta"><b>{p.department}</b><small>{p.status}</small></div><span className="score">{Math.round(p.prognosis)}%</span></button>}
+function PatientDetail({p,act,diag,setDiag,treatment,setTreatment,test,setTest,operation,setOperation,vitals,setVitals}:{p?:Patient;act:(a:ClientAction)=>void;diag:string;setDiag:(x:string)=>void;treatment:string;setTreatment:(x:string)=>void;test:string;setTest:(x:string)=>void;operation:string;setOperation:(x:string)=>void;vitals:Partial<VitalSigns>;setVitals:(x:Partial<VitalSigns>)=>void}){if(!p)return <section className="panel empty">Patient auswählen.</section>;const saveVitals=()=>act({type:'vitals',patientId:p.id,vitals:{pulse:Number(vitals.pulse??p.vitals.pulse),systolic:Number(vitals.systolic??p.vitals.systolic),diastolic:Number(vitals.diastolic??p.vitals.diastolic),spo2:Number(vitals.spo2??p.vitals.spo2),temperature:Number(vitals.temperature??p.vitals.temperature),pain:Number(vitals.pain??p.vitals.pain),consciousness:Number(vitals.consciousness??p.vitals.consciousness)}});return <section className="panel detail"><div className="detail-head"><div><span className="eyebrow">PATIENTENAKTE #{p.id}</span><h2>{p.name}</h2><p>{p.age} Jahre · {p.condition} · {p.department}</p></div><span className={`badge ${p.priority.toLowerCase()}`}>{p.priority}</span></div><div className="vitals">{[['Puls',`${p.vitals.pulse}/min`],['RR',`${p.vitals.systolic}/${p.vitals.diastolic}`],['SpO₂',`${p.vitals.spo2}%`],['Temperatur',`${p.vitals.temperature}°C`],['Schmerz',`${p.vitals.pain}/10`],['GCS',`${p.vitals.consciousness}/15`]].map(([a,b])=><div key={a as string}><small>{a}</small><strong>{b}</strong></div>)}</div><div className="detail-grid"><div><h3>Dokumentation</h3><p className="note">{p.notes}</p><div className="chips">{p.tests.map(x=><span key={x}>{x}</span>)}{p.treatments.map(x=><span key={x}>{x}</span>)}</div><p className="muted">Allergien: {p.allergies.length?p.allergies.join(', '):'keine dokumentiert'}</p></div><div><h3>Prognose</h3><strong className="bigscore">{Math.round(p.prognosis)}%</strong><Progress value={p.prognosis}/><small>{p.status}</small></div></div><div className="actionbox"><h3>Vitalwerte & Therapie</h3><div className="inline">{(['pulse','systolic','diastolic','spo2','temperature','pain','consciousness'] as const).map(k=><input key={k} className="smallinput" value={vitals[k]??p.vitals[k]} onChange={e=>setVitals({...vitals,[k]:Number(e.target.value)})} aria-label={k}/>)}<button onClick={saveVitals}>Vitalwerte speichern</button></div><div className="inline"><input placeholder="Diagnose" value={diag} onChange={e=>setDiag(e.target.value)}/><button onClick={()=>{act({type:'diagnosis',patientId:p.id,diagnosis:diag||'Diagnose dokumentiert'});setDiag('')}}>Diagnose setzen</button><input placeholder="Behandlung / Medikament" value={treatment} onChange={e=>setTreatment(e.target.value)}/><button onClick={()=>{act({type:'treatment',patientId:p.id,treatment:treatment||'Symptomatische Behandlung'});setTreatment('')}}>Behandlung</button></div><div className="inline"><input placeholder="z. B. Labor / CT / Röntgen" value={test} onChange={e=>setTest(e.target.value)}/><button onClick={()=>{act({type:'test',patientId:p.id,test:test||'Diagnostik',department:'Radiologie'});setTest('')}}>Diagnostik</button><button onClick={()=>act({type:'admit',patientId:p.id,department:p.department})}>Station aufnehmen</button><input placeholder="OP-Bezeichnung" value={operation} onChange={e=>setOperation(e.target.value)}/><button onClick={()=>{act({type:'prepareOperation',patientId:p.id,operation:operation||'Operativer Eingriff'});setOperation('')}}>OP vorbereiten</button><button onClick={()=>act({type:'discharge',patientId:p.id})}>Entlassen</button></div></div></section>}
+function DepartmentPanel({deps,act}:{deps:HospitalState['departments'];act:(a:ClientAction)=>void}){return <div className="grid three">{deps.map(d=><section className="panel department-card" key={d.name}><div className="panelhead"><div><h2>{d.name}</h2><small>{d.type}</small></div><span className={d.open?'ok':'bad'}>{d.open?'OFFEN':'ZU'}</span></div><div className="dept-stat"><span>Belegung</span><b>{d.occupancy}/{d.capacity}</b></div><Progress value={d.capacity?d.occupancy/d.capacity*100:0}/><div className="dept-stat"><span>Personal</span><b>{d.staff}</b></div><div className="dept-stat"><span>Nachfrage</span><b>{d.demand}</b></div><button onClick={()=>act({type:'toggleDepartment',department:d.name,open:!d.open})}>{d.open?'Abteilung schließen':'Abteilung öffnen'}</button></section>)}</div>}
+function DiagnosticPanel({patients,tasks,act}:{patients:Patient[];tasks:HospitalState['tasks'];act:(a:ClientAction)=>void}){return <div className="grid two"><section className="panel"><div className="panelhead"><h2>Diagnostik-Aufträge</h2></div>{tasks.filter(t=>t.department==='Labor'||t.department==='Radiologie').map(t=><TaskRow task={t} onToggle={()=>act({type:'toggleTask',taskId:t.id})} key={t.id}/>)}</section><section className="panel"><div className="panelhead"><h2>Patienten in Diagnostik</h2></div>{patients.filter(p=>p.status==='Diagnostik').map(p=><PatientRow key={p.id} p={p} selected={false} onClick={()=>{}}/>)}</section></div>}
+function OperationPanel({patients,act}:{patients:Patient[];act:(a:ClientAction)=>void}){const prep=patients.filter(p=>p.status==='OP-Vorbereitung'),run=patients.filter(p=>p.status==='OP');return <div className="grid two"><section className="panel"><div className="panelhead"><h2>OP-Vorbereitung</h2></div>{prep.length?prep.map(p=><div className="oprow" key={p.id}><div><b>{p.name}</b><small>{p.operation}</small></div><button onClick={()=>act({type:'startOperation',patientId:p.id})}>OP starten</button></div>):<div className="empty">Keine Patienten vorbereitet</div>}</section><section className="panel"><div className="panelhead"><h2>Laufende Operationen</h2><span className="ok">{run.length} aktiv</span></div>{run.length?run.map(p=><div className="oprow" key={p.id}><div><b>{p.name}</b><small>{p.operation}</small></div><button onClick={()=>act({type:'finishOperation',patientId:p.id})}>OP beenden</button></div>):<div className="empty">Kein OP belegt</div>}</section></div>}
+function StaffPanel({staff,act}:{staff:HospitalState['staff'];act:(a:ClientAction)=>void}){const roles:Array<StaffRole>=['Oberarzt','Facharzt','Assistenzarzt','Pflegefachkraft','MTRA','MTLA','Anästhesist','OP-Pflege','Physiotherapie','Verwaltung'];return <div className="grid two"><section className="panel"><div className="panelhead"><h2>Personal</h2><button onClick={()=>act({type:'callStaff',role:'Pflegefachkraft'})}>Pflege rufen</button></div>{staff.map(s=><div className="staffrow" key={s.id}><div className="avatar">{s.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div><div><b>{s.name}</b><small>{s.role} · {s.department}</small></div><span className={s.status==='Im Dienst'?'good':''}>{s.status}</span></div>)}</section><section className="panel"><div className="panelhead"><h2>Personal anfordern</h2></div><div className="role-grid">{roles.map(r=><button key={r} onClick={()=>act({type:'callStaff',role:r})}>{r}</button>)}</div></section></div>}
+function BedsPanel({beds,patients,act}:{beds:HospitalState['beds'];patients:Patient[];act:(a:ClientAction)=>void}){return <div className="bedgrid">{beds.map(b=><div className={`bed-card ${b.status.toLowerCase()}`} key={b.id}><b>{b.id}</b><span>{b.department}</span><small>{b.patientId?patients.find(p=>p.id===b.patientId)?.name:`${b.status}`}</small>{b.status==='Reinigung'&&<button onClick={()=>act({type:'cleanBed',bedId:b.id})}>Freigeben</button>}</div>)}</div>}
+function TasksPanel({tasks,act}:{tasks:HospitalState['tasks'];act:(a:ClientAction)=>void}){return <section className="panel"><div className="panelhead"><h2>Aufgaben</h2></div>{tasks.map(t=><TaskRow key={t.id} task={t} onToggle={()=>act({type:'toggleTask',taskId:t.id})}/>)}</section>}
+function EventsPanel({events}:{events:HospitalState['events']}){return <section className="panel"><div className="panelhead"><h2>Ereignisprotokoll</h2><span>{events.length} Einträge</span></div><div className="events">{events.map(e=><div className={`event ${e.type}`} key={e.id}><time>{clock(e.at)}</time><div><b>{e.text}</b>{e.patientId&&<small>Patient #{e.patientId}</small>}</div></div>)}</div></section>}
+function TaskRow({task,onToggle}:{task:HospitalState['tasks'][number];onToggle:()=>void}){return <div className={`taskrow ${task.done?'done':''}`}><button className="check" onClick={onToggle}>{task.done?'✓':''}</button><div><b>{task.label}</b><small>{task.detail}</small></div><span className={`mini ${task.priority.toLowerCase()}`}>{task.priority}</span></div>}
+function Status({label,value}:{label:string;value:string}){return <div className="statusline"><span>{label}</span><b><i/>{value}</b></div>}
+createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);
