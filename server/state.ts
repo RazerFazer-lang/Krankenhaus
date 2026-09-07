@@ -1,0 +1,91 @@
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import type { Bed, ClientAction, Department, DepartmentState, HospitalEvent, HospitalState, Patient, Player, Priority, Staff, StaffRole, Task, VitalSigns } from '../src/types.js';
+
+const FILE = process.env.HOSPITAL_STATE_FILE ?? './data/hospital-state.json';
+const now = Date.now();
+const departments: { name: Department; type: string; capacity: number }[] = [
+  { name:'Notaufnahme', type:'Akutversorgung', capacity:8 }, { name:'Chirurgie', type:'Station / OP', capacity:10 }, { name:'Innere Medizin', type:'Station', capacity:14 },
+  { name:'Anästhesie', type:'OP / Intensiv', capacity:6 }, { name:'Intensivstation', type:'Intensivmedizin', capacity:6 }, { name:'Radiologie', type:'Diagnostik', capacity:5 },
+  { name:'Kardiologie', type:'Herzmedizin', capacity:8 }, { name:'Pädiatrie', type:'Kinder', capacity:8 }, { name:'Labor', type:'Diagnostik', capacity:4 }, { name:'Apotheke', type:'Medikamente', capacity:3 }, { name:'Hygiene', type:'Aufbereitung', capacity:4 }
+];
+
+const vital = (pulse:number,systolic:number,diastolic:number,spo2:number,temp:number,pain:number,consciousness=15): VitalSigns => ({pulse,systolic,diastolic,spo2,temperature:temp,pain,consciousness});
+const patients: Patient[] = [
+ {id:1042,name:'Patient #1042',age:67,sex:'m',condition:'Akutes Koronarsyndrom',diagnosis:'V. a. NSTEMI',priority:'Rot',status:'Diagnostik',department:'Kardiologie',arrival:now-18*60000,vitals:vital(108,92,58,94,37.4,8,15),notes:'Retrosternaler Druckschmerz seit ca. 35 Minuten.',allergies:[],medications:[],tests:['EKG','Troponin'],treatments:[],prognosis:76},
+ {id:1043,name:'Patient #1043',age:34,sex:'w',condition:'Unterarmfraktur',diagnosis:'Noch offen',priority:'Gelb',status:'Behandlung',department:'Chirurgie',arrival:now-31*60000,vitals:vital(88,128,79,99,36.8,7),notes:'Sturz mit Deformität rechter Unterarm.',allergies:['Penicillin'],medications:[],tests:['Röntgen Unterarm'],treatments:['Ruhigstellung'],prognosis:96},
+ {id:1044,name:'Patient #1044',age:22,sex:'d',condition:'Synkope',diagnosis:'Noch offen',priority:'Grün',status:'Wartebereich',department:'Innere Medizin',arrival:now-9*60000,vitals:vital(76,119,74,99,36.7,1),notes:'Kurzer Bewusstseinsverlust, aktuell wach und orientiert.',allergies:[],medications:[],tests:[],treatments:[],prognosis:99},
+ {id:1045,name:'Patient #1045',age:6,sex:'w',condition:'Fieber / Exsikkose',diagnosis:'Fieber unklarer Genese',priority:'Gelb',status:'Triage',department:'Pädiatrie',arrival:now-6*60000,vitals:vital(132,101,61,97,39.2,3),notes:'Hohes Fieber und reduzierte Trinkmenge.',allergies:[],medications:[],tests:['Blutbild'],treatments:[],prognosis:91}
+];
+const staff: Staff[] = [
+ {id:1,name:'Dr. Weber',role:'Oberarzt',department:'Notaufnahme',status:'Behandlung',patientId:1042,skill:95,shiftEnd:now+4*3600000}, {id:2,name:'Dr. Kaya',role:'Assistenzarzt',department:'Innere Medizin',status:'Im Dienst',skill:76,shiftEnd:now+4*3600000},
+ {id:3,name:'Dr. Lehmann',role:'Facharzt',department:'Chirurgie',status:'Behandlung',patientId:1043,skill:91,shiftEnd:now+4*3600000}, {id:4,name:'Dr. Santos',role:'Anästhesist',department:'Anästhesie',status:'Im Dienst',skill:93,shiftEnd:now+4*3600000},
+ {id:5,name:'M. Fischer',role:'Pflegefachkraft',department:'Notaufnahme',status:'Im Dienst',skill:86,shiftEnd:now+4*3600000}, {id:6,name:'L. Hahn',role:'Pflegefachkraft',department:'Intensivstation',status:'Im Dienst',skill:88,shiftEnd:now+4*3600000},
+ {id:7,name:'K. Brandt',role:'MTRA',department:'Radiologie',status:'Im Dienst',skill:87,shiftEnd:now+4*3600000}, {id:8,name:'J. Vogt',role:'MTLA',department:'Labor',status:'Im Dienst',skill:90,shiftEnd:now+4*3600000},
+ {id:9,name:'S. Roth',role:'OP-Pflege',department:'Chirurgie',status:'Im Dienst',skill:88,shiftEnd:now+4*3600000}, {id:10,name:'A. Neumann',role:'Pflegefachkraft',department:'Innere Medizin',status:'Im Dienst',skill:82,shiftEnd:now+4*3600000}
+];
+const beds: Bed[] = [
+ ...Array.from({length:8},(_,i)=>({id:`NA-${i+1}`,department:'Notaufnahme' as Department,status:(i<3?'Belegt':'Frei') as Bed['status'],patientId:i===0?1042:i===1?1043:i===2?1045:undefined})),
+ ...Array.from({length:10},(_,i)=>({id:`INT-${i+1}`,department:'Innere Medizin' as Department,status:(i<5?'Belegt':'Frei') as Bed['status']})),
+ ...Array.from({length:8},(_,i)=>({id:`CH-${i+1}`,department:'Chirurgie' as Department,status:(i<3?'Belegt':'Frei') as Bed['status']})),
+ ...Array.from({length:6},(_,i)=>({id:`ITS-${i+1}`,department:'Intensivstation' as Department,status:(i<2?'Belegt':'Frei') as Bed['status']})),
+ ...Array.from({length:8},(_,i)=>({id:`KARD-${i+1}`,department:'Kardiologie' as Department,status:(i<2?'Belegt':'Frei') as Bed['status']})),
+ ...Array.from({length:8},(_,i)=>({id:`KIND-${i+1}`,department:'Pädiatrie' as Department,status:(i<1?'Belegt':'Frei') as Bed['status']})),
+];
+const tasks: Task[] = [
+ {id:'t-1',label:'EKG bei Patient #1042 auswerten',detail:'Kardiologie · Rot',department:'Kardiologie',priority:'Rot',patientId:1042,done:false,created:now-8*60000},
+ {id:'t-2',label:'Röntgen Patient #1043 prüfen',detail:'Radiologie · Gelb',department:'Radiologie',priority:'Gelb',patientId:1043,done:false,created:now-7*60000},
+ {id:'t-3',label:'Blutbild Patient #1045 bearbeiten',detail:'Labor · Gelb',department:'Labor',priority:'Gelb',patientId:1045,done:false,created:now-5*60000}
+];
+const events: HospitalEvent[] = [
+ {id:randomUUID(),at:now-2*60000,type:'diagnostic',text:'Laborauftrag #L-381 gestartet',patientId:1045}, {id:randomUUID(),at:now-5*60000,type:'patient',text:'Patient #1045 in Triage aufgenommen',patientId:1045},
+ {id:randomUUID(),at:now-8*60000,type:'diagnostic',text:'Patient #1043 zur Radiologie eingeplant',patientId:1043}, {id:randomUUID(),at:now-11*60000,type:'critical',text:'Patient #1042 benötigt dringende kardiologische Beurteilung',patientId:1042}
+];
+const state: HospitalState = {time:now,money:100000,reputation:80,patients,staff,beds,tasks,events,departments:[],players:[],day:1,weather:'Klar'};
+
+function refreshDepartments(){ state.departments = departments.map(d => ({...d,open:true,occupancy:state.beds.filter(b=>b.department===d.name&&b.status==='Belegt').length,staff:state.staff.filter(s=>s.department===d.name&&s.status!=='Abwesend').length,demand:state.patients.filter(p=>p.department===d.name&&p.status!=='Entlassung').length})); }
+refreshDepartments();
+
+export async function loadState(){ try { const raw=await readFile(FILE,'utf8'); Object.assign(state,JSON.parse(raw)); } catch { await saveState(); } refreshDepartments(); return state; }
+export async function saveState(){ await mkdir(dirname(FILE),{recursive:true}); await writeFile(FILE,JSON.stringify(state,null,2)); }
+export function getState(){ refreshDepartments(); return state; }
+function event(type:HospitalEvent['type'],text:string,patientId?:number){ state.events.unshift({id:randomUUID(),at:state.time,type,text,patientId}); state.events=state.events.slice(0,100); }
+function patient(id:number){ return state.patients.find(p=>p.id===id); }
+function reject(msg:string): never { throw new Error(msg); }
+function cleanName(id:number){ return `Patient #${id}`; }
+
+export function applyAction(action:ClientAction, actor?:string){
+ switch(action.type){
+  case 'createPatient': { const id=Math.max(...state.patients.map(p=>p.id),1041)+1; const p:Patient={id,name:cleanName(id),age:Math.floor(6+Math.random()*78),sex:['m','w','d'][Math.floor(Math.random()*3)] as Patient['sex'],condition:'Akuter Notfall',diagnosis:'Noch offen',priority:'Gelb',status:'Wartebereich',department:'Notaufnahme',arrival:state.time,vitals:vital(88,124,77,98,37.0,4),notes:'Neue Aufnahme · Anamnese ausstehend.',allergies:[],medications:[],tests:[],treatments:[],prognosis:94}; state.patients.unshift(p); event('patient',`${p.name} neu aufgenommen${actor?` durch ${actor}`:''}`,id); break; }
+  case 'triage': { const p=patient(action.patientId); if(!p) reject('Patient nicht gefunden'); p.priority=action.priority; p.status='Triage'; event('patient',`${p.name}: Triage ${action.priority}`,p.id); break; }
+  case 'vitals': { const p=patient(action.patientId); if(!p) reject('Patient nicht gefunden'); p.vitals={...p.vitals,...action.vitals}; if(p.vitals.spo2<90||p.vitals.systolic<85||p.vitals.consciousness<9) p.priority='Rot'; event('patient',`${p.name}: Vitalwerte aktualisiert`,p.id); break; }
+  case 'diagnosis': { const p=patient(action.patientId); if(!p) reject('Patient nicht gefunden'); p.diagnosis=action.diagnosis; p.status='Behandlung'; event('patient',`${p.name}: Diagnose gesetzt → ${action.diagnosis}`,p.id); break; }
+  case 'test': { const p=patient(action.patientId); if(!p) reject('Patient nicht gefunden'); p.tests=Array.from(new Set([...p.tests,action.test])); p.department=action.department; p.status='Diagnostik'; state.tasks.unshift({id:randomUUID(),label:`${action.test} bei ${p.name}`,detail:`${action.department} · Auftrag`,department:action.department,priority:p.priority,patientId:p.id,done:false,created:state.time}); event('diagnostic',`${p.name}: ${action.test} angefordert`,p.id); break; }
+  case 'treatment': { const p=patient(action.patientId); if(!p) reject('Patient nicht gefunden'); p.treatments.push(action.treatment); p.status='Behandlung'; p.prognosis=Math.min(100,p.prognosis+2); event('patient',`${p.name}: ${action.treatment}`,p.id); break; }
+  case 'assign': { const p=patient(action.patientId), s=state.staff.find(x=>x.id===action.staffId); if(!p||!s) reject('Patient oder Personal nicht gefunden'); if(s.status==='OP') reject('Personal ist bereits im OP'); if(action.kind==='doctor'){p.assignedDoctorId=s.id}else{p.assignedNurseId=s.id}; s.status='Behandlung'; s.patientId=p.id; event('staff',`${s.name} ${action.kind==='doctor'?'ärztlich':'pflegerisch'} ${p.name} zugewiesen`,p.id); break; }
+  case 'admit': { const p=patient(action.patientId); if(!p) reject('Patient nicht gefunden'); const bed=state.beds.find(b=>b.department===action.department&&b.status==='Frei'); if(!bed) reject(`Kein freies Bett in ${action.department}`); bed.status='Belegt'; bed.patientId=p.id; p.bedId=bed.id; p.department=action.department; p.status='Stationär'; event('patient',`${p.name} auf ${action.department} aufgenommen · ${bed.id}`,p.id); break; }
+  case 'prepareOperation': { const p=patient(action.patientId); if(!p) reject('Patient nicht gefunden'); p.operation=action.operation; p.status='OP-Vorbereitung'; p.department='Chirurgie'; state.tasks.unshift({id:randomUUID(),label:`OP-Vorbereitung ${p.name}`,detail:action.operation,department:'Chirurgie',priority:p.priority,patientId:p.id,done:false,created:state.time}); event('operation',`${p.name}: OP-Vorbereitung · ${action.operation}`,p.id); break; }
+  case 'startOperation': { const p=patient(action.patientId); if(!p||!p.operation) reject('Keine OP-Vorbereitung vorhanden'); const surgeon=state.staff.find(s=>s.role==='Facharzt'&&s.department==='Chirurgie'&&s.status==='Im Dienst')??state.staff.find(s=>s.role==='Oberarzt'&&s.status==='Im Dienst'); const anesth=state.staff.find(s=>s.role==='Anästhesist'&&s.status==='Im Dienst'); if(!surgeon||!anesth) reject('Chirurgie oder Anästhesie nicht besetzt'); p.status='OP'; p.department='Chirurgie'; surgeon.status='OP'; surgeon.patientId=p.id; anesth.status='OP'; anesth.patientId=p.id; event('operation',`${p.name}: OP gestartet · ${p.operation}`,p.id); break; }
+  case 'finishOperation': { const p=patient(action.patientId); if(!p) reject('Patient nicht gefunden'); p.status='Behandlung'; p.prognosis=Math.min(100,p.prognosis+6); for(const s of state.staff) if(s.patientId===p.id&&s.status==='OP'){s.status='Im Dienst';s.patientId=undefined;} event('operation',`${p.name}: OP beendet, postoperativ`,p.id); break; }
+  case 'discharge': { const p=patient(action.patientId); if(!p) reject('Patient nicht gefunden'); p.status='Entlassung'; if(p.bedId){const b=state.beds.find(x=>x.id===p.bedId);if(b){b.patientId=undefined;b.status='Reinigung';b.cleanAt=state.time+5*60000;}p.bedId=undefined;} for(const s of state.staff) if(s.patientId===p.id){s.patientId=undefined;s.status='Im Dienst';} state.money+=250; event('patient',`${p.name} entlassen · Behandlung abgeschlossen`,p.id); break; }
+  case 'cleanBed': { const b=state.beds.find(x=>x.id===action.bedId); if(!b) reject('Bett nicht gefunden'); b.status='Frei'; b.cleanAt=undefined; event('system',`Bett ${b.id} hygienisch freigegeben`); break; }
+  case 'toggleDepartment': { const d=state.departments.find(x=>x.name===action.department); if(!d) reject('Abteilung nicht gefunden'); d.open=action.open; event('system',`${action.department}: ${action.open?'geöffnet':'geschlossen'}`); break; }
+  case 'addTask': state.tasks.unshift({id:randomUUID(),label:action.label,detail:action.detail,department:action.department,priority:action.priority,patientId:action.patientId,done:false,created:state.time}); event('system',`Aufgabe angelegt: ${action.label}`); break;
+  case 'toggleTask': { const t=state.tasks.find(x=>x.id===action.taskId); if(!t) reject('Aufgabe nicht gefunden'); t.done=!t.done; event('system',`${t.done?'Abgeschlossen':'Wieder offen'}: ${t.label}`); break; }
+  case 'callStaff': { const s=state.staff.find(x=>x.role===action.role&&x.status==='Im Dienst'); if(!s) reject(`Kein ${action.role} verfügbar`); s.status='Behandlung'; event('staff',`${s.name} (${s.role}) wurde angefordert`); break; }
+  case 'houseAlarm': { for(const s of state.staff) if(s.status==='Pause') s.status='Im Dienst'; event('critical','HAUSALARM ausgelöst · alle verfügbaren Teams informiert'); break; }
+ }
+ refreshDepartments(); return state;
+}
+
+export function tick(ms:number){
+ state.time += ms;
+ for(const b of state.beds) if(b.status==='Reinigung'&&b.cleanAt&&b.cleanAt<=state.time){b.status='Frei';b.cleanAt=undefined;event('system',`Bett ${b.id} nach Reinigung wieder frei`)}
+ for(const p of state.patients){ if(p.status==='Entlassung') continue; const minutes=ms/60000; if(p.priority==='Rot'&&p.status!=='Behandlung'&&p.status!=='OP'){p.vitals.systolic=Math.max(65,p.vitals.systolic-Math.random()*minutes*0.8);p.vitals.spo2=Math.max(82,p.vitals.spo2-Math.random()*minutes*0.12);p.prognosis=Math.max(5,p.prognosis-minutes*0.35);} if(p.vitals.systolic<80||p.vitals.spo2<88){p.priority='Rot';event('critical',`${p.name}: kritische Vitalwerte · sofortige Behandlung erforderlich`,p.id);} }
+ for(const s of state.staff) if(s.shiftEnd<=state.time&&s.status==='Im Dienst') {s.status='Abwesend';event('staff',`${s.name} hat Schichtende`)}
+ refreshDepartments();
+}
+
+export function addPlayer(player:Player){ state.players=state.players.filter(p=>p.id!==player.id); state.players.push(player); }
+export function removePlayer(id:string){ state.players=state.players.filter(p=>p.id!==id); }
